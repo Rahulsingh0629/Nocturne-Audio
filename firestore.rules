@@ -1,0 +1,77 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all access to any unmentioned document or collection
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // User profile and subcollections: strictly private to the authenticated owner
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow create, update: if isOwner(uid) && isValidUserProfile();
+      allow delete: if isOwner(uid);
+
+      // Favorites subcollection
+      match /favorites/{songId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // Playlists subcollection
+      match /playlists/{playlistId} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && isValidPlaylist();
+        allow delete: if isOwner(uid);
+      }
+
+      // Private User Uploads metadata subcollection
+      match /uploads/{uploadId} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && isValidUploadMetadata();
+        allow delete: if isOwner(uid);
+      }
+
+      // Recent Searches subcollection
+      match /recentSearches/{searchId} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && isValidRecentSearch();
+        allow delete: if isOwner(uid);
+      }
+    }
+
+    // Helper functions
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    function isValidUserProfile() {
+      let incoming = request.resource.data;
+      return incoming.name is string && incoming.name.size() <= 100
+          && incoming.email is string && incoming.email.size() <= 100
+          && incoming.preferredLanguages is list && incoming.preferredLanguages.size() <= 20
+          && incoming.preferredDecades is list && incoming.preferredDecades.size() <= 20;
+    }
+
+    function isValidPlaylist() {
+      let incoming = request.resource.data;
+      return incoming.name is string && incoming.name.size() <= 100
+          && incoming.songIds is list && incoming.songIds.size() <= 500;
+    }
+
+    function isValidUploadMetadata() {
+      let incoming = request.resource.data;
+      return incoming.title is string && incoming.title.size() <= 100
+          && incoming.artist is string && incoming.artist.size() <= 100
+          && incoming.year is number && incoming.year >= 1900 && incoming.year <= request.time.year()
+          && incoming.language is string && incoming.language.size() <= 50
+          && incoming.storagePath is string && incoming.storagePath.size() <= 200
+          && incoming.sizeBytes is number && incoming.sizeBytes > 0 && incoming.sizeBytes <= 104857600; // Max 100 MB
+    }
+
+    function isValidRecentSearch() {
+      let incoming = request.resource.data;
+      return incoming.query is string && incoming.query.size() <= 100;
+    }
+  }
+}
