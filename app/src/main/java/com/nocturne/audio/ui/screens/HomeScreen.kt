@@ -172,7 +172,6 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.padding(bottom = 10.dp)
             ) {
-                // If a year outside the top 8 is selected, add it dynamically
                 val displayYears = if (uiState.selectedYear !in uiState.initialYears) {
                     listOf(uiState.selectedYear) + uiState.initialYears
                 } else {
@@ -366,7 +365,7 @@ fun HomeScreen(
                                         .padding(14.dp)
                                 ) {
                                     Text(
-                                        text = "Note: Jamendo features independent and royalty-free artists. Certain year and language combinations may have limited catalogue entries.",
+                                        text = "Note: JioSaavn features top Bollywood, Regional, and International releases. Select a year or language filter to stream.",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = TextTertiary,
                                         textAlign = TextAlign.Center
@@ -400,7 +399,6 @@ fun HomeScreen(
                                 )
                             }
 
-                            // Infinite scroll loading indicator at bottom
                             if (uiState.isLoadingMore) {
                                 item {
                                     Box(

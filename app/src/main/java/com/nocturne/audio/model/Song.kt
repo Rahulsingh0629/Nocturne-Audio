@@ -3,7 +3,8 @@ package com.nocturne.audio.model
 enum class SongSource {
     JAMENDO,
     LOCAL,
-    UPLOAD
+    UPLOAD,
+    SAAVN
 }
 
 data class Song(
@@ -15,6 +16,6 @@ data class Song(
     val durationSeconds: Int = 0,
     val year: Int = 0,
     val language: String = "",
-    val source: SongSource = SongSource.JAMENDO,
+    val source: SongSource = SongSource.SAAVN,
     val isFavorite: Boolean = false
 )

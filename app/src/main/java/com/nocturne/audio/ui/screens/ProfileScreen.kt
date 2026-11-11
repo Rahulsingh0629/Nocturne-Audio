@@ -426,7 +426,7 @@ fun ProfileScreen(
                             text = "1. Data Collection: We collect only your name, email, music preferences, favorites, playlists, and uploaded audio metadata.\n\n" +
                                    "2. Cloud Uploads: Audio files uploaded by you are stored privately in Firebase Storage. They are strictly private to your account and never shared publicly.\n\n" +
                                    "3. Copyright & Ownership: You must own or hold rights to any audio file you upload.\n\n" +
-                                   "4. Jamendo Catalog: Main streaming content is sourced via the free Jamendo API (independent & royalty-free artists). Artist credit is displayed on all tracks.",
+                                   "4. JioSaavn Catalog: Main streaming content is sourced via JioSaavn API.",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
                         )

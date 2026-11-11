@@ -112,7 +112,7 @@ class HomeViewModel(
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            errorMessage = error.message ?: "Failed to load songs from Jamendo."
+                            errorMessage = error.message ?: "Failed to load songs from JioSaavn."
                         )
                     }
                 }

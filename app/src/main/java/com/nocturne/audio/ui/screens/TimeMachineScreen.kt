@@ -75,7 +75,6 @@ fun TimeMachineScreen(
     val uiState by viewModel.uiState.collectAsState()
     val dialListState = rememberLazyListState()
 
-    // Smoothly animate Era Banner colors when transitioning between eras
     val animatedPrimaryColor by animateColorAsState(
         targetValue = uiState.currentEra.primaryColor,
         animationSpec = tween(700),
@@ -144,7 +143,7 @@ fun TimeMachineScreen(
                 }
             }
 
-            // Year Dial Row with Previous / Next Buttons
+            // Year Dial Row
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -210,12 +209,12 @@ fun TimeMachineScreen(
             ) {
                 Column {
                     Text(
-                        text = "Top 10 on Jamendo (${uiState.selectedYear})",
+                        text = "Top 10 on JioSaavn (${uiState.selectedYear})",
                         style = MaterialTheme.typography.titleLarge,
                         color = TextPrimary
                     )
                     Text(
-                        text = "Most popular independent releases",
+                        text = "Most popular releases for this year",
                         style = MaterialTheme.typography.bodySmall,
                         color = TextTertiary
                     )

@@ -62,8 +62,8 @@ class FavoritesRepositoryImpl(
                 }
                 val songs = snapshot?.documents?.mapNotNull { doc ->
                     val data = doc.data ?: return@mapNotNull null
-                    val sourceString = data["source"] as? String ?: "JAMENDO"
-                    val source = try { SongSource.valueOf(sourceString) } catch (e: Exception) { SongSource.JAMENDO }
+                    val sourceString = data["source"] as? String ?: "SAAVN"
+                    val source = try { SongSource.valueOf(sourceString) } catch (_: Exception) { SongSource.SAAVN }
 
                     Song(
                         id = doc.id,

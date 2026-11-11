@@ -39,6 +39,7 @@ import com.nocturne.audio.ui.theme.SurfaceDark
 import com.nocturne.audio.ui.theme.TextPrimary
 import com.nocturne.audio.ui.theme.TextSecondary
 import com.nocturne.audio.ui.theme.TextTertiary
+import java.util.Locale
 
 @Composable
 fun SongCard(
@@ -98,6 +99,7 @@ fun SongCard(
             )
 
             val sourceTag = when (song.source) {
+                SongSource.SAAVN -> "JioSaavn"
                 SongSource.JAMENDO -> "Jamendo"
                 SongSource.LOCAL -> "Local"
                 SongSource.UPLOAD -> "My Upload"
@@ -144,5 +146,5 @@ private fun formatDuration(seconds: Int): String {
     if (seconds <= 0) return "--:--"
     val mins = seconds / 60
     val secs = seconds % 60
-    return String.format("%d:%02d", mins, secs)
+    return String.format(Locale.getDefault(), "%d:%02d", mins, secs)
 }

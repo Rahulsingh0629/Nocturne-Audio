@@ -301,6 +301,7 @@ class PlayerRepositoryImpl private constructor() : PlayerRepository {
 
     private fun updateQualityLabel(song: Song) {
         _qualityLabel.value = when (song.source) {
+            SongSource.SAAVN -> "320kbps • JioSaavn Streaming"
             SongSource.JAMENDO -> "MP3 • 320kbps streaming"
             SongSource.LOCAL -> {
                 val urlLower = song.audioUrl.lowercase()
