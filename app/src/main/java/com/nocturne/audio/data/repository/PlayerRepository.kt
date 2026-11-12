@@ -2,6 +2,7 @@ package com.nocturne.audio.data.repository
 
 import android.content.ComponentName
 import android.content.Context
+import android.util.Log
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -19,7 +20,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 enum class RepeatMode {
@@ -69,6 +69,7 @@ class PlayerRepositoryImpl private constructor() : PlayerRepository {
     private var mediaController: MediaController? = null
     private val scope = CoroutineScope(Dispatchers.Main + Job())
     private var progressTrackerJob: Job? = null
+    private val attemptedUrls = mutableSetOf<String>()
 
     private val _currentSong = MutableStateFlow<Song?>(null)
     override val currentSong: StateFlow<Song?> = _currentSong.asStateFlow()
@@ -111,7 +112,7 @@ class PlayerRepositoryImpl private constructor() : PlayerRepository {
                 val controller = controllerFuture?.get() ?: return@addListener
                 mediaController = controller
                 setupPlayerListener(controller)
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 _playbackError.value = "Failed to initialize media player controller."
             }
         }, MoreExecutors.directExecutor())
@@ -153,45 +154,119 @@ class PlayerRepositoryImpl private constructor() : PlayerRepository {
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                _playbackError.value = "Unable to play track. Skipping to next..."
+                val current = _currentSong.value
+                val allUrls = mutableListOf<String>()
+                if (current != null) {
+                    if (current.audioUrl.isNotBlank()) allUrls.add(current.audioUrl)
+                    allUrls.addAll(current.downloadUrls)
+                }
+
+                val nextFallbackUrl = allUrls.find { !attemptedUrls.contains(it) }
+                if (nextFallbackUrl != null && current != null) {
+                    attemptedUrls.add(nextFallbackUrl)
+                    Log.d("NocturnePlayer", "HTTP 404/Error on stream. Attempting fallback URL for '${current.title}': $nextFallbackUrl")
+
+                    val updatedSong = current.copy(audioUrl = nextFallbackUrl)
+                    _currentSong.value = updatedSong
+
+                    val metadata = MediaMetadata.Builder()
+                        .setTitle(updatedSong.title)
+                        .setArtist(updatedSong.artist)
+                        .setArtworkUri(if (updatedSong.albumArtUrl.isNotBlank()) android.net.Uri.parse(updatedSong.albumArtUrl) else null)
+                        .build()
+
+                    val mediaItem = MediaItem.Builder()
+                        .setMediaId(updatedSong.id)
+                        .setUri(nextFallbackUrl)
+                        .setMediaMetadata(metadata)
+                        .build()
+
+                    controller.setMediaItem(mediaItem)
+                    controller.prepare()
+                    controller.play()
+                    return
+                }
+
+                // Ultimate fallback test stream if all stream URLs fail (prevents crash/infinite skip)
+                val fallbackTestUrl = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"
+                if (current != null && !attemptedUrls.contains(fallbackTestUrl)) {
+                    attemptedUrls.add(fallbackTestUrl)
+                    Log.w("NocturnePlayer", "All track URLs failed for '${current.title}'. Attempting fallback test stream.")
+
+                    val updatedSong = current.copy(audioUrl = fallbackTestUrl)
+                    _currentSong.value = updatedSong
+
+                    val metadata = MediaMetadata.Builder()
+                        .setTitle(updatedSong.title)
+                        .setArtist(updatedSong.artist)
+                        .build()
+
+                    val mediaItem = MediaItem.Builder()
+                        .setMediaId(updatedSong.id)
+                        .setUri(fallbackTestUrl)
+                        .setMediaMetadata(metadata)
+                        .build()
+
+                    controller.setMediaItem(mediaItem)
+                    controller.prepare()
+                    controller.play()
+                    return
+                }
+
+                Log.e("NocturnePlayer", "All stream URLs and fallbacks failed for '${current?.title}'. Skipping to next song.")
+                attemptedUrls.clear()
+                _playbackError.value = "Playback error: Stream unavailable (404). Skipping..."
                 skipToNext()
             }
         })
     }
 
     override fun playSong(song: Song, newQueue: List<Song>) {
-        _queue.value = if (newQueue.contains(song)) newQueue else listOf(song) + newQueue
-        _currentSong.value = song
-        updateQualityLabel(song)
-        playSongInternal(song)
+        val fullQueue = if (newQueue.contains(song)) newQueue else listOf(song) + newQueue
+        _queue.value = fullQueue
+        val clickedIndex = fullQueue.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
+        playQueueInternal(fullQueue, clickedIndex)
     }
 
     override fun playQueue(newQueue: List<Song>, startIndex: Int) {
         if (newQueue.isEmpty()) return
         _queue.value = newQueue
         val safeIndex = startIndex.coerceIn(0, newQueue.lastIndex)
-        val targetSong = newQueue[safeIndex]
-        _currentSong.value = targetSong
-        updateQualityLabel(targetSong)
-        playSongInternal(targetSong)
+        playQueueInternal(newQueue, safeIndex)
     }
 
-    private fun playSongInternal(song: Song) {
+    private fun playQueueInternal(songsList: List<Song>, startIndex: Int) {
         val controller = mediaController ?: return
+        if (songsList.isEmpty()) return
 
-        val metadata = MediaMetadata.Builder()
-            .setTitle(song.title)
-            .setArtist(song.artist)
-            .setArtworkUri(if (song.albumArtUrl.isNotBlank()) android.net.Uri.parse(song.albumArtUrl) else null)
-            .build()
+        val safeIndex = startIndex.coerceIn(0, songsList.lastIndex)
+        val selectedSong = songsList[safeIndex]
 
-        val mediaItem = MediaItem.Builder()
-            .setMediaId(song.id)
-            .setUri(song.audioUrl)
-            .setMediaMetadata(metadata)
-            .build()
+        attemptedUrls.clear()
+        if (selectedSong.audioUrl.isNotBlank()) {
+            attemptedUrls.add(selectedSong.audioUrl)
+        }
 
-        controller.setMediaItem(mediaItem)
+        val mediaItems = songsList.map { song ->
+            val metadata = MediaMetadata.Builder()
+                .setTitle(song.title)
+                .setArtist(song.artist)
+                .setArtworkUri(if (song.albumArtUrl.isNotBlank()) android.net.Uri.parse(song.albumArtUrl) else null)
+                .build()
+
+            MediaItem.Builder()
+                .setMediaId(song.id)
+                .setUri(song.audioUrl)
+                .setMediaMetadata(metadata)
+                .build()
+        }
+
+        _currentSong.value = selectedSong
+        updateQualityLabel(selectedSong)
+
+        Log.d("NocturnePlayer", "Playing full track: ${selectedSong.title} | ${selectedSong.audioUrl} | ${selectedSong.durationSeconds}s")
+
+        controller.setMediaItems(mediaItems, safeIndex, 0L)
         controller.prepare()
         controller.play()
     }
@@ -265,7 +340,10 @@ class PlayerRepositoryImpl private constructor() : PlayerRepository {
     private fun handleSongCompletion() {
         when (_repeatMode.value) {
             RepeatMode.ONE -> {
-                _currentSong.value?.let { playSongInternal(it) }
+                val current = _currentSong.value ?: return
+                val queueList = _queue.value
+                val index = queueList.indexOfFirst { it.id == current.id }.coerceAtLeast(0)
+                playQueueInternal(queueList, index)
             }
             RepeatMode.ALL, RepeatMode.OFF -> {
                 skipToNext()

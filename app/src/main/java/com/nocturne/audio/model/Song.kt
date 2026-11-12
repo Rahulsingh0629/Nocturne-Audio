@@ -13,6 +13,7 @@ data class Song(
     val artist: String = "",
     val albumArtUrl: String = "",
     val audioUrl: String = "",
+    val downloadUrls: List<String> = emptyList(),
     val durationSeconds: Int = 0,
     val year: Int = 0,
     val language: String = "",

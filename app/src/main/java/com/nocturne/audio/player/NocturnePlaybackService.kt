@@ -18,10 +18,16 @@ class NocturnePlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
 
-        // Configure HTTP Data Source with valid User-Agent & cross-protocol redirects for JioSaavn / Jamendo CDN streams
+        // Configure HTTP Data Source with standard browser User-Agent, Referer, Origin, redirects, and 15s timeouts for JioSaavn CDN
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36")
+            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
             .setAllowCrossProtocolRedirects(true)
+            .setDefaultRequestProperties(
+                mapOf(
+                    "Referer" to "https://www.jiosaavn.com/",
+                    "Origin" to "https://www.jiosaavn.com"
+                )
+            )
             .setConnectTimeoutMs(15000)
             .setReadTimeoutMs(15000)
 

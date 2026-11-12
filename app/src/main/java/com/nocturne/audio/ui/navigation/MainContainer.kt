@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -20,7 +21,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.nocturne.audio.model.Song
+import com.nocturne.audio.data.repository.PlayerRepository
+import com.nocturne.audio.data.repository.PlayerRepositoryImpl
 import com.nocturne.audio.ui.components.MiniPlayer
 import com.nocturne.audio.ui.screens.HomeScreen
 import com.nocturne.audio.ui.screens.LibraryScreen
@@ -33,16 +35,18 @@ import com.nocturne.audio.ui.screens.UploadSongScreen
 @Composable
 fun MainContainer(
     rootNavController: NavHostController,
-    onSignOut: () -> Unit
+    onSignOut: () -> Unit,
+    playerRepository: PlayerRepository = PlayerRepositoryImpl.getInstance()
 ) {
     val bottomNavController = rememberNavController()
     val navBackStackEntry by bottomNavController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route ?: NavTab.Home.route
 
-    // State for player and now playing modal
-    var activeSong by remember { mutableStateOf<Song?>(null) }
-    var isPlaying by remember { mutableStateOf(false) }
-    var progressFraction by remember { mutableStateOf(0.35f) }
+    // Direct binding to singleton PlayerRepository
+    val activeSong by playerRepository.currentSong.collectAsState()
+    val isPlaying by playerRepository.isPlaying.collectAsState()
+    val progressFraction by playerRepository.progressFraction.collectAsState()
+
     var showNowPlaying by remember { mutableStateOf(false) }
 
     val hideBottomBarRoutes = listOf("upload_song")
@@ -61,8 +65,8 @@ fun MainContainer(
                             currentSong = activeSong,
                             isPlaying = isPlaying,
                             progressFraction = progressFraction,
-                            onPlayPauseClick = { isPlaying = !isPlaying },
-                            onNextClick = { /* Handle next track */ },
+                            onPlayPauseClick = { playerRepository.togglePlayPause() },
+                            onNextClick = { playerRepository.skipToNext() },
                             onMiniPlayerClick = { showNowPlaying = true }
                         )
                     }
@@ -95,8 +99,7 @@ fun MainContainer(
                 composable(NavTab.Home.route) {
                     HomeScreen(
                         onSongSelected = { song ->
-                            activeSong = song
-                            isPlaying = true
+                            playerRepository.playSong(song)
                         },
                         onProfileClick = {
                             bottomNavController.navigate(NavTab.Profile.route) {
@@ -113,8 +116,7 @@ fun MainContainer(
                 composable(NavTab.Search.route) {
                     SearchScreen(
                         onSongSelected = { song ->
-                            activeSong = song
-                            isPlaying = true
+                            playerRepository.playSong(song)
                         }
                     )
                 }
@@ -122,8 +124,7 @@ fun MainContainer(
                 composable(NavTab.TimeMachine.route) {
                     TimeMachineScreen(
                         onSongSelected = { song ->
-                            activeSong = song
-                            isPlaying = true
+                            playerRepository.playSong(song)
                         }
                     )
                 }
@@ -131,8 +132,7 @@ fun MainContainer(
                 composable(NavTab.Library.route) {
                     LibraryScreen(
                         onSongSelected = { song ->
-                            activeSong = song
-                            isPlaying = true
+                            playerRepository.playSong(song)
                         },
                         onNavigateToUpload = {
                             bottomNavController.navigate("upload_song")
@@ -163,7 +163,7 @@ fun MainContainer(
                 NowPlayingScreen(
                     song = activeSong,
                     isPlaying = isPlaying,
-                    onPlayPauseToggle = { isPlaying = !isPlaying },
+                    onPlayPauseToggle = { playerRepository.togglePlayPause() },
                     onDismiss = { showNowPlaying = false }
                 )
             }

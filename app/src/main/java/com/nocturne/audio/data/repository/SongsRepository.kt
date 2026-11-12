@@ -5,6 +5,8 @@ import android.util.Base64
 import com.nocturne.audio.model.Song
 import com.nocturne.audio.model.SongSource
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -15,12 +17,17 @@ import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
 interface SongsRepository {
-    suspend fun getSongsByYearAndLanguage(year: Int, languageCode: String, offset: Int = 0, limit: Int = 20): Result<List<Song>>
-    suspend fun searchSongs(query: String, year: Int? = null, languageCode: String? = null, genre: String? = null, offset: Int = 0, limit: Int = 20): Result<List<Song>>
+    suspend fun getSongsByYearAndLanguage(year: Int, languageCode: String, offset: Int = 0, limit: Int = 30): Result<List<Song>>
+    suspend fun searchSongs(query: String, year: Int? = null, languageCode: String? = null, genre: String? = null, offset: Int = 0, limit: Int = 30): Result<List<Song>>
     suspend fun getTop10ForYear(year: Int): Result<List<Song>>
 }
 
 class SongsRepositoryImpl : SongsRepository {
+
+    private val dynamicSearchPool = listOf(
+        "Top Hindi English Songs 2026", "Trending Hits 2026", "Bollywood Classics",
+        "Top Bollywood Songs", "Punjabi Hits 2026", "Romantic Hits 2026", "Arijit Singh Hits"
+    )
 
     override suspend fun getSongsByYearAndLanguage(
         year: Int,
@@ -31,20 +38,37 @@ class SongsRepositoryImpl : SongsRepository {
         return withContext(Dispatchers.IO) {
             try {
                 val langName = mapLanguageCodeToName(languageCode)
-                val saavnQuery = if (langName.isBlank() || langName.equals("all", ignoreCase = true)) {
-                    "Bollywood $year"
-                } else {
-                    "$langName $year"
-                }
+                val isAllLanguages = langName.isBlank() || langName.equals("all", ignoreCase = true)
 
-                val page = (offset / limit) + 1
-                val songs = fetchJioSaavnSongs(query = saavnQuery, page = page, limit = limit, fallbackYear = year, fallbackLang = langName)
+                val songs = if (isAllLanguages && offset == 0) {
+                    fetchDynamicFreshMix(year, limit)
+                } else {
+                    val saavnQuery = if (isAllLanguages) {
+                        "Trending Hits $year"
+                    } else {
+                        "$langName $year"
+                    }
+                    val page = (offset / limit) + 1
+                    fetchJioSaavnSongs(query = saavnQuery, page = page, limit = limit, fallbackYear = year, fallbackLang = langName)
+                }
 
                 Result.success(songs)
             } catch (e: Exception) {
                 Result.failure(e)
             }
         }
+    }
+
+    private suspend fun fetchDynamicFreshMix(year: Int, limit: Int): List<Song> = coroutineScope {
+        val pickedQueries = dynamicSearchPool.shuffled().take(2)
+        val deferred1 = async { fetchJioSaavnSongs(pickedQueries[0], page = 1, limit = 20, fallbackYear = year, fallbackLang = "") }
+        val deferred2 = async { fetchJioSaavnSongs(pickedQueries[1], page = 1, limit = 20, fallbackYear = year, fallbackLang = "") }
+
+        val list1 = deferred1.await()
+        val list2 = deferred2.await()
+
+        val combined = (list1 + list2).distinctBy { it.id }.shuffled()
+        if (combined.isNotEmpty()) combined.take(limit) else fetchJioSaavnSongs("Top Hindi English Songs $year", page = 1, limit = limit, fallbackYear = year, fallbackLang = "")
     }
 
     override suspend fun searchSongs(
@@ -65,7 +89,7 @@ class SongsRepositoryImpl : SongsRepository {
                 }
                 if (year != null && year in 1900..2100) queryParts.add(year.toString())
 
-                val saavnQuery = if (queryParts.isNotEmpty()) queryParts.joinToString(" ") else "Bollywood 2026"
+                val saavnQuery = if (queryParts.isNotEmpty()) queryParts.joinToString(" ") else "Top Songs 2026"
                 val page = (offset / limit) + 1
 
                 val songs = fetchJioSaavnSongs(query = saavnQuery, page = page, limit = limit, fallbackYear = year ?: 0, fallbackLang = languageCode ?: "")
@@ -90,14 +114,32 @@ class SongsRepositoryImpl : SongsRepository {
 
     private fun fetchJioSaavnSongs(query: String, page: Int, limit: Int, fallbackYear: Int, fallbackLang: String): List<Song> {
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
-        val urlDev = "https://saavn.dev/api/search/songs?query=$encodedQuery&page=$page&limit=$limit"
 
-        val devResults = tryFetchUrl(urlDev)
-        if (!devResults.isNullOrBlank()) {
-            val songs = parseSaavnDevJson(devResults, fallbackYear, fallbackLang)
+        // 1. Primary Endpoint: saavn.sumit.co
+        val urlSumit = "https://saavn.sumit.co/api/search/songs?query=$encodedQuery&limit=$limit&page=$page"
+        val sumitResults = tryFetchUrl(urlSumit)
+        if (!sumitResults.isNullOrBlank()) {
+            val songs = parseSaavnDevJson(sumitResults, fallbackYear, fallbackLang)
             if (songs.isNotEmpty()) return songs
         }
 
+        // 2. Fallback Endpoint 1: jiosaavn-api-privatecvc2.vercel.app
+        val urlPrivate = "https://jiosaavn-api-privatecvc2.vercel.app/search/songs?query=$encodedQuery&limit=$limit&page=$page"
+        val privateResults = tryFetchUrl(urlPrivate)
+        if (!privateResults.isNullOrBlank()) {
+            val songs = parseSaavnDevJson(privateResults, fallbackYear, fallbackLang)
+            if (songs.isNotEmpty()) return songs
+        }
+
+        // 3. Fallback Endpoint 2: jiosaavn-api-2.vercel.app
+        val urlVercel2 = "https://jiosaavn-api-2.vercel.app/search/songs?query=$encodedQuery&limit=$limit&page=$page"
+        val vercel2Results = tryFetchUrl(urlVercel2)
+        if (!vercel2Results.isNullOrBlank()) {
+            val songs = parseSaavnDevJson(vercel2Results, fallbackYear, fallbackLang)
+            if (songs.isNotEmpty()) return songs
+        }
+
+        // 4. Fallback Endpoint 3: Official JioSaavn API
         val urlOfficial = "https://www.jiosaavn.com/api.php?__call=search.getResults&_format=json&_marker=0&api_version=4&ctx=web6dot0&q=$encodedQuery&n=$limit&p=$page"
         val officialResults = tryFetchUrl(urlOfficial)
         if (!officialResults.isNullOrBlank()) {
@@ -113,10 +155,10 @@ class SongsRepositoryImpl : SongsRepository {
             val url = URL(urlString)
             val connection = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
-                connectTimeout = 8000
-                readTimeout = 8000
+                connectTimeout = 6000
+                readTimeout = 6000
                 setRequestProperty("Accept", "application/json")
-                setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
             }
 
             val responseCode = connection.responseCode
@@ -134,6 +176,7 @@ class SongsRepositoryImpl : SongsRepository {
         val resultsArray = dataObj?.optJSONArray("results")
             ?: jsonObject.optJSONArray("results")
             ?: jsonObject.optJSONArray("data")
+            ?: dataObj?.optJSONArray("data")
             ?: return emptyList()
 
         val songsList = mutableListOf<Song>()
@@ -165,20 +208,21 @@ class SongsRepositoryImpl : SongsRepository {
                 albumArtUrl = albumArtUrl.replace("150x150", "500x500").replace("50x50", "500x500")
             }
 
-            val downloadUrlArray = item.optJSONArray("downloadUrl")
-            var audioUrl = extractUrlFromMediaArray(downloadUrlArray)
-
-            if (audioUrl.isBlank()) {
-                audioUrl = item.optJSONObject("more_info")?.optString("vlink", "") ?: ""
-            }
-
-            if (audioUrl.isBlank()) continue
+            // Strictly extract full-length song audio URL and fallback download URLs (never 3-second preview/Jiotune clip)
+            val extraction = extractAudioUrls(item)
+            var audioUrl = extraction.audioUrl
+            val downloadUrls = extraction.downloadUrls
+            if (audioUrl.isBlank() || audioUrl.contains("jiotunepreview")) continue
 
             if (audioUrl.startsWith("http://")) {
                 audioUrl = audioUrl.replace("http://", "https://")
             }
 
-            val durationSeconds = item.optInt("duration", 0)
+            val durationRaw = item.optInt("duration", 0)
+            val durationStr = item.optString("duration", "0").toIntOrNull() ?: 0
+            val moreInfoDuration = item.optJSONObject("more_info")?.optString("duration", "0")?.toIntOrNull() ?: 0
+            val durationSeconds = if (durationRaw > 0) durationRaw else if (durationStr > 0) durationStr else moreInfoDuration
+
             val itemYear = item.optInt("year", 0)
             val safeYear = if (itemYear in 1900..2100) itemYear else fallbackYear
 
@@ -189,6 +233,7 @@ class SongsRepositoryImpl : SongsRepository {
                     artist = artist,
                     albumArtUrl = albumArtUrl,
                     audioUrl = audioUrl,
+                    downloadUrls = downloadUrls,
                     durationSeconds = durationSeconds,
                     year = safeYear,
                     language = fallbackLang,
@@ -220,26 +265,21 @@ class SongsRepositoryImpl : SongsRepository {
                 albumArtUrl = albumArtUrl.replace("150x150", "500x500").replace("50x50", "500x500")
             }
 
-            val moreInfo = item.optJSONObject("more_info")
-            var audioUrl = moreInfo?.optString("vlink", "") ?: ""
-
-            if (audioUrl.isBlank()) {
-                val encUrl = moreInfo?.optString("encrypted_media_url", "") ?: ""
-                if (encUrl.isNotBlank()) {
-                    audioUrl = decryptJioSaavnMediaUrl(encUrl)
-                }
-            }
-
-            if (audioUrl.isBlank()) continue
+            // Strictly extract full-length audio URL and fallback download URLs (never jiotunepreview)
+            val extraction = extractAudioUrls(item)
+            var audioUrl = extraction.audioUrl
+            val downloadUrls = extraction.downloadUrls
+            if (audioUrl.isBlank() || audioUrl.contains("jiotunepreview")) continue
 
             if (audioUrl.startsWith("http://")) {
                 audioUrl = audioUrl.replace("http://", "https://")
             }
 
+            val moreInfo = item.optJSONObject("more_info")
             val durationStr = moreInfo?.optString("duration", "0") ?: "0"
-            val durationSeconds = durationStr.toIntOrNull() ?: 0
+            val durationSeconds = durationStr.toIntOrNull() ?: item.optInt("duration", 0)
 
-            val itemYear = item.optString("year", "0").toIntOrNull() ?: 0
+            val itemYear = item.optString("year", "0").toIntOrNull() ?: item.optInt("year", 0)
             val safeYear = if (itemYear in 1900..2100) itemYear else fallbackYear
 
             songsList.add(
@@ -249,6 +289,7 @@ class SongsRepositoryImpl : SongsRepository {
                     artist = artist,
                     albumArtUrl = albumArtUrl,
                     audioUrl = audioUrl,
+                    downloadUrls = downloadUrls,
                     durationSeconds = durationSeconds,
                     year = safeYear,
                     language = fallbackLang,
@@ -258,6 +299,51 @@ class SongsRepositoryImpl : SongsRepository {
             )
         }
         return songsList
+    }
+
+    data class AudioExtractionResult(val audioUrl: String, val downloadUrls: List<String>)
+
+    private fun extractAudioUrls(item: JSONObject): AudioExtractionResult {
+        val urlsList = mutableListOf<String>()
+
+        val downloadUrlArray = item.optJSONArray("downloadUrl")
+        if (downloadUrlArray != null && downloadUrlArray.length() > 0) {
+            for (i in 0 until downloadUrlArray.length()) {
+                val obj = downloadUrlArray.optJSONObject(i) ?: continue
+                val url = obj.optString("url", "").ifBlank { obj.optString("link", "") }.replace("http://", "https://")
+                if (url.isNotBlank() && !url.contains("jiotunepreview") && !urlsList.contains(url)) {
+                    urlsList.add(url)
+                }
+            }
+        }
+
+        val moreInfo = item.optJSONObject("more_info")
+        val encUrl = moreInfo?.optString("encrypted_media_url", "")?.ifBlank { item.optString("encrypted_media_url", "") } ?: ""
+        if (encUrl.isNotBlank()) {
+            val decrypted = decryptJioSaavnMediaUrl(encUrl)
+            if (decrypted.isNotBlank() && !decrypted.contains("jiotunepreview") && !urlsList.contains(decrypted)) {
+                urlsList.add(decrypted)
+            }
+        }
+
+        val directUrl = (moreInfo?.optString("media_url", "") ?: "").ifBlank { item.optString("media_url", "") }.replace("http://", "https://")
+        if (directUrl.isNotBlank() && !directUrl.contains("jiotunepreview") && !urlsList.contains(directUrl)) {
+            urlsList.add(directUrl)
+        }
+
+        val best320 = urlsList.find { it.contains("320") || it.contains("high") }
+        val best160 = urlsList.find { it.contains("160") || it.contains("128") }
+        val primaryUrl = best320 ?: best160 ?: urlsList.firstOrNull() ?: ""
+
+        val finalDownloadUrls = mutableListOf<String>()
+        if (primaryUrl.isNotBlank()) finalDownloadUrls.add(primaryUrl)
+        for (url in urlsList) {
+            if (!finalDownloadUrls.contains(url)) {
+                finalDownloadUrls.add(url)
+            }
+        }
+
+        return AudioExtractionResult(primaryUrl, finalDownloadUrls)
     }
 
     private fun decryptJioSaavnMediaUrl(encryptedUrl: String): String {
@@ -280,7 +366,7 @@ class SongsRepositoryImpl : SongsRepository {
         if (mediaArray == null || mediaArray.length() == 0) return ""
         for (i in mediaArray.length() - 1 downTo 0) {
             val obj = mediaArray.optJSONObject(i) ?: continue
-            val url = obj.optString("url", "").replace("http://", "https://")
+            val url = obj.optString("url", "").ifBlank { obj.optString("link", "") }.replace("http://", "https://")
             if (url.isNotBlank()) return url
         }
         return ""
@@ -296,6 +382,7 @@ class SongsRepositoryImpl : SongsRepository {
                 .replace("&#039;", "'")
                 .replace("&lt;", "<")
                 .replace("&gt;", ">")
+                .replace("&nbsp;", " ")
                 .trim()
         }
     }
